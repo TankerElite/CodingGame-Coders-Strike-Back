@@ -1,5 +1,5 @@
 # CodingGame-Coders-Strike-Back
-CodingGame Coders Strike Back by Sander Kornet
+CodingGame Coders Strike Back by TankerElite
 
 Sources used: Physics Textbooks and Math Textbooks to read up on vector computation.
 
