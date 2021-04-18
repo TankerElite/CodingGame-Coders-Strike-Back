@@ -45,6 +45,8 @@ class Pod {
         int boosts;
         int lastLeader;
         vector<tuple<int, int, int>> checkpointVector;
+
+        tuple<int, int> lastpos;
     
     public:
     //Public values for the Pod class
@@ -58,6 +60,7 @@ class Pod {
             , lap(0)
             , driver(1)
             , boosts(1)
+            , lastpos(0, 0)
         {
         }
 
@@ -237,7 +240,7 @@ class Pod {
             }
         }
 
-        string action( tuple<int, int> opponentPod) {
+        string action( tuple<int, int, int, int> opponentPod) {
             /**
             Main robot AI
 
@@ -246,7 +249,7 @@ class Pod {
 
             **/
             if (this -> driver == 1) {
-                cerr << "We have a driver." << endl;
+                //cerr << "We have a driver." << endl;
                 //AI is driver
                 tuple <int, int, int> nextCheckpoint = this->checkpointVector.at(this->checkpoint);
                 //Throwaway default thrust value
@@ -260,6 +263,9 @@ class Pod {
                 double oldAngle = abs_to_relative(nextCheckpoint) - this->angle;
                 //throw (f"angle is {oldAngle}") <-Needs converting  to c++ syntax if needed
 
+                cerr << "Driver stats are" << endl;
+                cerr << to_string(nextCheckpointDistance) << endl;
+                cerr << to_string(oldAngle) << endl;
 
                 if ( (nextCheckpointDistance >= 4000) and (-5 <= oldAngle) and (oldAngle <= 5) and (boosts >= 1) ){
                     //Boost - direction is good, distance is (arbitrarily) long enough for the boost to be useful and we have a boost
@@ -274,10 +280,17 @@ class Pod {
                     compromised by more agressive drift cancellation via larger MAGIC_HEURISTIC value **/
 
                     //Slow down when approaching the checkpoint given the distance to checkpoint, based off of an arbitrary heuristic function
-                    thrust = to_string(int(abs(nextCheckpointDistance * 0.0526316 ) - 31.5789));
+                    //thrust = to_string(int(abs(nextCheckpointDistance * 0.0526316 ) - 31.5789));
+
+                    thrust = to_string(int(abs(nextCheckpointDistance * 0.0327253 ) + 22.8433));
                 } else {
-                    if ( (-9 <= oldAngle) and  (oldAngle <= 9)) {
+                    if ( (-30 <= oldAngle) and  (oldAngle <= 30) and ( abs(nextCheckpointDistance) <= 800) ) {
+                        //We are within 30 degrees to the checkpoint and close enough that we should just maxthrust,
+                        //we were most likely crashed into right near the checkpoint and can just thrust into it
+                        thrust = to_string(100);
+                    } else if ( (-10 <= oldAngle) and  (oldAngle <= 10)) {
                         //We are within 9 degrees, or half of a turn's pivot value, to be directed straight at the checkpoint
+                        //We should use maxthrust since we will be moving towards the checkpoint for atleast half the given turn
                         thrust = to_string(100);
                     } else if ( (10 < oldAngle) and (oldAngle <= 100) ) {
                         /**We are between 10 and 100 degrees to be directed straight at the checkpoint,
@@ -291,9 +304,26 @@ class Pod {
 
                         //Currently the same as adjusting within positive angle values
                         thrust = to_string(int(110.164 - 0.565574*(abs(oldAngle))));
+                    } else if ( ( (oldAngle >= 250) or (oldAngle <= -250) ) and (abs(nextCheckpointDistance) >= 4000 ))  {
+                        //Getting true direction, while it should be clamped -180 - 180, sometimes gives values beyond that clamp, which is very strange,
+                        //this happens when the pod is nearly facing a checkpoint at a weird angle, try thrusting at it as a solution.
+                        //This could be a python->c++ implementation anomaly
+                        //A rewrite of the oldAngle computation or a rewrite of the whole angle handling is required
+
+                        //This is the far away option - just charge at the target
+                        thrust = to_string(100);
+                    
+                    } else if ( ( (oldAngle >= 250) or (oldAngle <= -250)) and (abs(nextCheckpointDistance) <= 2500 ))  {
+                        //Getting true direction, while it should be clamped -180 - 180, sometimes gives values beyond that clamp, which is very strange,
+                        //this happens when the pod is nearly facing a checkpoint at a weird angle, try thrusting at it as a solution.
+                        //This could be a python->c++ implementation anomaly
+                        //A rewrite of the oldAngle computation or a rewrite of the whole angle handling is required
+
+                        //This is the close option - use the same heuristic function to determine speed as you otherwise would
+                        thrust = to_string(int(abs(nextCheckpointDistance * 0.0526316 ) - 31.5789));
                     } else {
                         //We are completely turned around, we do not want to go fast as that will increase our travel-time to hit the checkpoint 
-                        thrust = to_string(10);
+                        thrust = to_string(5);
                     }
                 }
 
@@ -305,12 +335,11 @@ class Pod {
                     This has not yet been neccessary for thrust speeds of values smaller than 0 due to the way the heuristic functions were
                     chosen, and results of boosts being lower than 0 are attainable much later than passing the checkpoint and obtaining a new
                     distance to the next checkpoint.**/
-                    cerr << "Non-interceptor  thrust is" << endl;
-                    cerr << thrust << endl;
                     if (stoi(thrust) > 100) {
                         thrust = to_string(100);
                     }
                 }
+                cerr << "Non-interceptor  thrust is" + thrust << endl;
                 //Use drifting cancellation
                 int xTarget = get<1>(nextCheckpoint) - (MAGIC_HEURISTIC * this->speed_x);
                 int yTarget = get<2>(nextCheckpoint) - (MAGIC_HEURISTIC * this->speed_y);
@@ -328,13 +357,18 @@ class Pod {
 
                 //Interceptor should move at full speed
                 string thrust = to_string(100);
-                tuple <int, int> opponentData;
+
+                //Opponent location X + Y, opponent speed X + Y
+                tuple <int, int, int, int> opponentData;
                 opponentData = opponentPod;
+
+                //Required for opponent distance finding
+                tuple <int, int> opponentLocation ( get<0>(opponentData), get<1>(opponentData) );
                 
 
-                //Use drifting cancellation, but less of it compared to racer
-                int xTarget = get<0>(opponentData) - ((MAGIC_HEURISTIC) * this->speed_x);
-                int yTarget = get<1>(opponentData) - ((MAGIC_HEURISTIC) * this->speed_y);
+                //Drive ahead of opponent based on THEIR speed
+                int xTarget = (get<0>(opponentData) + MAGIC_HEURISTIC * get<2>(opponentData))  - (MAGIC_HEURISTIC * this->speed_x);
+                int yTarget = (get<1>(opponentData) + MAGIC_HEURISTIC *  get<3>(opponentData)) - (MAGIC_HEURISTIC * this->speed_y);
 
                 /** Show interceptor data
                 cerr << "Attacker is attacking" << endl;
@@ -347,20 +381,38 @@ class Pod {
                 **/
                 
                 //Subtract angle given by simulation from our actual angle to preserve bronze and silver league angle logic
-                double oldAngle = abs_to_relative(tuple<int, int, int> (1, get<0>(opponentData), get<1>(opponentData))) - this->angle;
+                double oldAngle = abs_to_relative(tuple<int, int, int> (1, xTarget, yTarget)) - this->angle;
 
 
-                double opponentDistance = calculatedDistance(pos, opponentData);
-                if ( (opponentDistance < 1200) and (-18 <= oldAngle) and (oldAngle <= 18) and (boosts >= 1) ){
+                double opponentDistance = calculatedDistance(pos, opponentLocation);
+
+                cerr << "Interceptor stats are" << endl;
+                cerr << to_string(opponentDistance) << endl;
+                cerr << "angle:" + to_string(oldAngle) << endl;
+
+                if ( (opponentDistance < 2500) and (-3 <= oldAngle) and (oldAngle <= 3) and (boosts >= 1) ){
                     //Opponent is close, we are looking towards him and we have a boost - use boost
                     thrust = "BOOST";
                     boosts -=1;
-                } else if ( (opponentDistance < 900) and (-36 <= oldAngle) and (oldAngle <= 36) ) {
+                } else if ( (opponentDistance < 1000) and (-36 <= oldAngle) and (oldAngle <= 36) ) {
                     //We are looking towards the opponent, we are very close and likely to impact soon - use shield
                     thrust = "SHIELD";
-                } else if ( ((-100 >= oldAngle) or (oldAngle >= 100)) and (opponentDistance < 900 )) {
+                } else if ( ((-100 >= oldAngle) or (oldAngle >= 100)) and (opponentDistance < 1000 )) {
                     //We are turned around but still likely to hit opponent, shield anyway
                     thrust = "SHIELD";
+
+                } else if ( (10 < oldAngle) and (oldAngle <= 100) ) {
+                    /**We are between 10 and 100 degrees to be directed straight at the checkpoint,
+                    determine our speed using an arbitrary heuristic function
+                    Useful if we wish to have differing heuristic functions depending on the side the pod is angled towards**/
+                     thrust = to_string(int(110.164 - 0.565574*(abs(oldAngle))));
+                } else if ( (-100 <= oldAngle) and (oldAngle < -10)) {
+                    /**We are between -10 and -100 degrees to be directed straight at the checkpoint,
+                    determine our speed using an arbitrary heuristic function
+                    Useful if we wish to have differing heuristic functions depending on the side the pod is angled towards**/
+
+                    //Currently the same as adjusting within positive angle values
+                    thrust = to_string(int(110.164 - 0.565574*(abs(oldAngle))));
                 } else if ( ((-100 >= oldAngle) or (oldAngle >= 100)) and (opponentDistance > 2000 )) {
                     //We are turned around, set thust to 10 until we re-aim.
                     thrust = to_string(10);
@@ -375,13 +427,12 @@ class Pod {
                     This has not yet been neccessary for thrust speeds of values smaller than 0 due to the way the heuristic functions were
                     chosen, and results of boosts being lower than 0 are attainable much later than passing the checkpoint and obtaining a new
                     distance to the next checkpoint.**/
-                    cerr << "Interceptor thrust is" << endl;
-                    cerr << thrust << endl;
                     if (stoi(thrust) > 100) {
                         thrust = to_string(100);
                     }
                 }
 
+                cerr << "Interceptor thrust is" + thrust << endl;
                 //Construct the outgoing string that the action() function returns
                 return to_string(xTarget) + " " + to_string(yTarget) + " " + thrust + " I am the rammer";
             }
@@ -400,12 +451,12 @@ int main()
     int checkpointCount;
     int podsMade = 0;
     int oppPodsMade = 0;
-    int interceptHasBegun = 0;
+    int killingHasBegun = 0;
     int IDCounter = 0;
     int opponentPodToKillID;
     int leaderID;
 
-    tuple<int, int> enemyPosTuple;
+    tuple<int, int, int, int> enemyPosTuple;
 
     vector<Pod> ownPodlist (2);
     vector<Pod> opponentPodlist (2);
@@ -505,13 +556,12 @@ int main()
         
         //Find our pod that is currently leading, and update his AI to be the driver AI for this turn.
         leaderID = ownPodlist[0].findLeadingPodID(ownPodlist[0], ownPodlist[1]);
-        cerr << "Leader ID is " << endl;
-        cerr << to_string(leaderID) << endl;
+        cerr << "Leader ID is "   + to_string(leaderID) << endl;
 
-        if (interceptHasBegun == 0) {
+        if (killingHasBegun == 0) {
             //We have not yet chosen a pod to target, so choose a leading pod using the findLeadingPod function.
             opponentPodToKillID = opponentPodlist[0].findLeadingPodID(opponentPodlist[0], opponentPodlist[1]);
-            interceptHasBegun = 1;
+            killingHasBegun = 1;
             cerr << "Killing has begun" << endl;
         } else {
             //We have already chosen a pod to target.
@@ -539,6 +589,8 @@ int main()
             if (opponentPodlist[i].getID() == opponentPodToKillID) {
                 get<0>(enemyPosTuple) = opponentPodlist[i].getPos('x');
                 get<1>(enemyPosTuple) = opponentPodlist[i].getPos('y');
+                get<2>(enemyPosTuple) = opponentPodlist[i].getSpeed('x');
+                get<3>(enemyPosTuple) = opponentPodlist[i].getSpeed('y');
 
                 /** Show targeted enemy location
                 cerr << "enemypostuple is " << endl;
